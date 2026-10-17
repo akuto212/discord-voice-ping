@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!requirements.lock
+!src/
+!src/voice_notify/
+!src/voice_notify/*.py

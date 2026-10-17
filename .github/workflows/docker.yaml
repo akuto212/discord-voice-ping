@@ -1,0 +1,127 @@
+name: Docker image
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Тесты и проверка Docker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Получить исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Установить uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.11.6"
+
+      - name: Проверить Python-код и зависимости
+        run: |
+          uv sync --locked
+          uv run --locked ruff format --check .
+          uv run --locked ruff check .
+          uv run --locked pytest -q
+          uv run --locked pip-audit -r requirements.lock --no-deps --disable-pip
+
+      - name: Проверить соответствие runtime-зависимостей lock-файлу
+        run: |
+          uv export --locked --no-dev --no-emit-project --no-header \
+            --format requirements-txt > "$RUNNER_TEMP/runtime-export.lock"
+          sed '/^#/d' requirements.lock > "$RUNNER_TEMP/runtime-committed.lock"
+          diff -u "$RUNNER_TEMP/runtime-committed.lock" "$RUNNER_TEMP/runtime-export.lock"
+
+      - name: Проверить Compose без секретов
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Собрать проверочный образ
+        run: docker build --pull --tag voice-notify:check .
+
+      - name: Проверить пользователя и запуск с read-only filesystem
+        run: |
+          test "$(docker image inspect --format '{{.Config.User}}' voice-notify:check)" = '10001:10001'
+          set +e
+          docker run --rm --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges=true voice-notify:check
+          container_status=$?
+          set -e
+          # Без конфигурации приложение должно завершиться понятной ошибкой с кодом 2.
+          test "$container_status" -eq 2
+
+  publish:
+    name: Опубликовать образ в GHCR
+    needs: verify
+    if: >-
+      github.event_name != 'pull_request' &&
+      (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
+       startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Получить исходники
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Подготовить эмуляцию ARM64
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+
+      - name: Подготовить Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Войти в GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Подготовить теги и метаданные
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=sha,format=long
+
+      - name: Собрать и опубликовать amd64 и arm64
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          pull: true
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=min

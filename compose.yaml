@@ -1,0 +1,24 @@
+services:
+  bot:
+    image: ${BOT_IMAGE:-discord-voice-notification-bot:local}
+    build: .
+    restart: unless-stopped
+    init: true
+    env_file:
+      - path: .env
+        required: true
+        format: raw
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.50
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
