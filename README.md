@@ -29,4 +29,4 @@ docker compose up -d
 | `TELEGRAM_CHAT_ID` | ID чата из [getUpdates](https://core.telegram.org/bots/api#getupdates), для групп — с минусом |
 | `DISCORD_GUILD_ID` | ID сервера: режим разработчика Discord → Копировать ID |
 | `DISCORD_VOICE_CHANNEL_IDS` | ID голосовых каналов через запятую |
-| `BOT_IMAGE` | Необязательно: готовый образ `ghcr.io/owner/repository:latest` |
+| `BOT_IMAGE` | Необязательно: по умолчанию `ghcr.io/akuto212/discord-voice-ping:latest` |

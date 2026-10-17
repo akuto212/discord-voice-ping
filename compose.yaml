@@ -1,7 +1,7 @@
 services:
   bot:
-    image: ${BOT_IMAGE:-discord-voice-notification-bot:local}
-    build: .
+    image: ${BOT_IMAGE:-ghcr.io/akuto212/discord-voice-ping:latest}
+    pull_policy: always
     restart: unless-stopped
     init: true
     env_file:
